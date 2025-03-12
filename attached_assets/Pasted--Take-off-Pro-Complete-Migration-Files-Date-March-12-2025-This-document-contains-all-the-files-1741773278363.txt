@@ -1,0 +1,1032 @@
+# Take-off Pro - Complete Migration Files
+Date: March 12, 2025
+
+This document contains all the files needed to set up the Take-off Pro application in a new Replit project. Copy this entire content and paste it into your new project's chat.
+
+## Initial Setup Commands
+```bash
+# Create directory structure
+mkdir -p client/src/{components,lib,pages/construction/scheduler} server/routes shared public
+
+# Install dependencies
+npm install @vitejs/plugin-react vite express cors @tanstack/react-query wouter react react-dom @hookform/resolvers zod drizzle-orm drizzle-zod multer @tanstack/react-query-devtools lucide-react @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-tooltip passport passport-local express-session memorystore @types/passport @types/passport-local @types/express-session openai diff @types/diff
+```
+
+## Required Environment Variables
+```env
+PORT=5000
+NODE_ENV=development
+VITE_API_URL=http://localhost:5000
+VITE_ALLOWED_HOSTS=all
+OPENAI_API_KEY=your_openai_api_key
+SESSION_SECRET=your_session_secret
+```
+
+## Core Files:
+
+### 1. server/index.ts
+```typescript
+import express from "express";
+import { createServer } from "http";
+import { registerRoutes } from "./routes";
+import { setupVite } from "./vite";
+import cors from "cors";
+import { performHealthCheck } from "./health-check";
+
+const app = express();
+const httpServer = createServer(app);
+const PORT = process.env.PORT || 5000;
+
+// Basic middleware setup
+app.use(express.json());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+// Register API routes
+registerRoutes(app);
+
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  const healthCheck = await performHealthCheck();
+  res.json(healthCheck);
+});
+
+async function startServer() {
+  try {
+    console.log('Starting API server...');
+    await setupVite(app, httpServer);
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
+```
+
+### 2. server/vite.ts
+```typescript
+import { createServer } from 'http';
+import { ViteDevServer } from 'vite';
+import express from 'express';
+
+export async function setupVite(app: express.Express, server: createServer) {
+    const vite = await import('vite');
+    const viteServer = await vite.createServer({
+        server: { 
+            middlewareMode: true,
+            hmr: {
+                server: server,
+                clientPort: 443,
+                protocol: 'wss'
+            },
+            host: '0.0.0.0',
+            port: 5000,
+            strictPort: true,
+            allowedHosts: true
+        }
+    });
+    app.use(viteServer.middlewares);
+}
+```
+
+### 3. server/routes/projects.ts
+```typescript
+import { Router } from "express";
+import { db } from "../db";
+import { eq } from "drizzle-orm";
+import { 
+  projects, 
+  insertProjectSchema,
+  projectTasks,
+  criticalPaths,
+  resources,
+  resourceAssignments 
+} from "@shared/schema";
+
+const router = Router();
+
+// Get all projects with enhanced details
+router.get("/", async (_req, res) => {
+  try {
+    const projectsList = await db
+      .select({
+        project: projects,
+        taskCount: projectTasks,
+        criticalTaskCount: criticalPaths,
+        resourceCount: resourceAssignments
+      })
+      .from(projects)
+      .leftJoin(projectTasks, eq(projects.id, projectTasks.projectId))
+      .leftJoin(criticalPaths, eq(projects.id, criticalPaths.projectId))
+      .leftJoin(resourceAssignments, eq(projectTasks.id, resourceAssignments.taskId));
+
+    // Group and format the results
+    const formattedProjects = projectsList.reduce((acc, curr) => {
+      if (!acc[curr.project.id]) {
+        acc[curr.project.id] = {
+          ...curr.project,
+          taskCount: 0,
+          criticalTaskCount: 0,
+          assignedResources: 0
+        };
+      }
+      if (curr.taskCount) acc[curr.project.id].taskCount++;
+      if (curr.criticalTaskCount) acc[curr.project.id].criticalTaskCount++;
+      if (curr.resourceCount) acc[curr.project.id].assignedResources++;
+      return acc;
+    }, {} as Record<number, any>);
+
+    res.json(Object.values(formattedProjects));
+  } catch (error) {
+    console.error("Failed to fetch projects:", error);
+    res.status(500).json({
+      error: "Failed to fetch projects",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+export default router;
+```
+
+### 4. server/routes/critical-path.ts
+```typescript
+import { Router } from "express";
+import { db } from "../db";
+import { eq, and } from "drizzle-orm";
+import { 
+  projectTasks,
+  criticalPaths,
+  resources,
+  resourceAssignments,
+  insertProjectTaskSchema,
+  insertCriticalPathSchema,
+  insertResourceAssignmentSchema 
+} from "@shared/schema";
+
+const router = Router();
+
+// Get all tasks for a project with critical path analysis
+router.get("/:projectId", async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.projectId);
+    const tasks = await db
+      .select({
+        task: projectTasks,
+        criticalPath: criticalPaths,
+        resources: resourceAssignments
+      })
+      .from(projectTasks)
+      .leftJoin(criticalPaths, eq(projectTasks.id, criticalPaths.taskId))
+      .leftJoin(resourceAssignments, eq(projectTasks.id, resourceAssignments.taskId))
+      .where(eq(projectTasks.projectId, projectId));
+
+    // Group tasks with their resources and critical path info
+    const groupedTasks = tasks.reduce((acc, curr) => {
+      if (!acc[curr.task.id]) {
+        acc[curr.task.id] = {
+          ...curr.task,
+          criticalPath: curr.criticalPath,
+          resources: []
+        };
+      }
+      if (curr.resources) {
+        acc[curr.task.id].resources.push(curr.resources);
+      }
+      return acc;
+    }, {} as Record<number, any>);
+
+    res.json(Object.values(groupedTasks));
+  } catch (error) {
+    console.error("Failed to fetch critical path:", error);
+    res.status(500).json({
+      error: "Failed to fetch critical path",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+export default router;
+```
+
+### 5. client/src/App.tsx
+```typescript
+import { Switch, Route } from "wouter";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./lib/queryClient";
+import { Toaster } from "@/components/ui/toaster";
+
+// Page components
+import ProjectsPage from "./pages/projects";
+import DrawingsPage from "./pages/drawings";
+import CostPlanPage from "./pages/projects/cost-plan";
+import NotFound from "./pages/not-found";
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <div className="min-h-screen bg-background">
+        <Switch>
+          <Route path="/" component={ProjectsPage} />
+          <Route path="/drawings" component={DrawingsPage} />
+          <Route path="/projects/cost-plan" component={CostPlanPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </div>
+      <Toaster />
+    </QueryClientProvider>
+  );
+}
+```
+
+### 6. client/src/lib/queryClient.ts
+```typescript
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+export async function apiRequest(
+  method: string,
+  url: string,
+  data?: unknown | undefined,
+): Promise<Response> {
+  const apiUrl = `${API_URL}${url}`;
+  const res = await fetch(apiUrl, {
+    method,
+    headers: data ? { "Content-Type": "application/json" } : {},
+    body: data ? JSON.stringify(data) : undefined,
+    credentials: "include",
+  });
+  await throwIfResNotOk(res);
+  return res;
+}
+
+async function throwIfResNotOk(res: Response) {
+  if (!res.ok) {
+    const errorData = await res.json();
+    const errorMessage = errorData.message || res.statusText;
+    throw new Error(errorMessage);
+  }
+}
+```
+
+### 7. tsconfig.json
+```json
+{
+  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "compilerOptions": {
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
+    "noEmit": true,
+    "module": "ESNext",
+    "strict": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@/*": ["./client/src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  }
+}
+```
+
+### 8. package.json
+```json
+{
+  "scripts": {
+    "dev": "tsx server/index.ts"
+  }
+}
+```
+
+### 9. client/src/pages/construction/scheduler/index.tsx
+```tsx
+import { useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  GanttChart,
+  Plus,
+  Link,
+  Calendar,
+  Users,
+  BarChart,
+  Clock,
+  AlertCircle
+} from "lucide-react";
+
+// Project timeline visualization
+const GanttView = () => {
+  return (
+    <div className="w-full h-[calc(100vh-20rem)] bg-white border rounded-lg p-4 overflow-auto">
+      <div className="min-w-[800px]">
+        {/* Timeline header */}
+        <div className="flex border-b">
+          <div className="w-64 p-2 font-medium">Task Name</div>
+          <div className="flex-1 flex">
+            {Array.from({ length: 31 }).map((_, i) => (
+              <div key={i} className="w-8 text-center text-sm border-l">
+                {i + 1}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Sample tasks */}
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex border-b hover:bg-muted/50">
+            <div className="w-64 p-2">Task {i + 1}</div>
+            <div className="flex-1 flex relative">
+              <div 
+                className="absolute h-6 bg-primary/20 border border-primary rounded"
+                style={{
+                  left: `${i * 20}px`,
+                  width: '120px',
+                  top: '4px'
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Critical path analysis panel
+const CriticalPathPanel = () => {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Link className="h-5 w-5" />
+          Critical Path Analysis
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-sm">
+            <span>Critical Tasks:</span>
+            <span className="font-medium">3</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span>Project Duration:</span>
+            <span className="font-medium">45 days</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span>Float Time:</span>
+            <span className="font-medium">5 days</span>
+          </div>
+          <div className="pt-2">
+            <div className="text-sm font-medium mb-2">Critical Path</div>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                Task 1 → Task 3 → Task 5
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+// Project metrics dashboard
+const ProjectMetrics = () => {
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Timeline</span>
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold">45</div>
+            <div className="text-sm text-muted-foreground">Days Remaining</div>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Resources</span>
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold">12</div>
+            <div className="text-sm text-muted-foreground">Assigned</div>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-2">
+            <BarChart className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Progress</span>
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold">35%</div>
+            <div className="text-sm text-muted-foreground">Completed</div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default function SchedulerPage() {
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold">CPM Scheduler</h1>
+          <p className="text-muted-foreground">
+            Project timeline and critical path management
+          </p>
+        </div>
+        <Button>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Task
+        </Button>
+      </div>
+
+      <ProjectMetrics />
+
+      <div className="grid grid-cols-[1fr,300px] gap-6">
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm">
+                <Clock className="h-4 w-4 mr-2" />
+                Auto-schedule
+              </Button>
+              <Button variant="outline" size="sm">
+                Level Resources
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm">
+                Week
+              </Button>
+              <Button variant="outline" size="sm">
+                Month
+              </Button>
+              <Button variant="outline" size="sm">
+                Quarter
+              </Button>
+            </div>
+          </div>
+          <GanttView />
+        </div>
+        <CriticalPathPanel />
+      </div>
+    </div>
+  );
+}
+```
+
+### 10. server/auth.ts
+```typescript
+import passport from "passport";
+import { Strategy as LocalStrategy } from "passport-local";
+import { Express } from "express";
+import session from "express-session";
+import { scrypt, randomBytes, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+import createMemoryStore from "memorystore";
+
+const MemoryStore = createMemoryStore(session);
+const scryptAsync = promisify(scrypt);
+
+async function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${buf.toString("hex")}.${salt}`;
+}
+
+async function comparePasswords(supplied: string, stored: string) {
+  const [hashed, salt] = stored.split(".");
+  const hashedBuf = Buffer.from(hashed, "hex");
+  const suppliedBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
+  return timingSafeEqual(hashedBuf, suppliedBuf);
+}
+
+const users = new Map<string, {id: number; email: string; name: string; password: string; isAdmin: boolean}>();
+
+export function setupAuth(app: Express) {
+  const sessionSettings: session.SessionOptions = {
+    secret: randomBytes(32).toString("hex"),
+    resave: false,
+    saveUninitialized: false,
+    store: new MemoryStore({
+      checkPeriod: 86400000 // prune expired entries every 24h
+    }),
+    cookie: {
+      secure: false, // Set to false for development
+      sameSite: "lax",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  };
+
+  app.set("trust proxy", 1);
+  app.use(session(sessionSettings));
+  app.use(passport.initialize());
+  app.use(passport.session());
+
+  passport.use(
+    new LocalStrategy(
+      {
+        usernameField: "email",
+        passwordField: "password",
+      },
+      async (email, password, done) => {
+        try {
+          // For development, create a test user if none exists
+          if (!users.has(email)) {
+            const hashedPassword = await hashPassword("password123");
+            users.set(email, {
+              id: 1,
+              email,
+              name: "Test User",
+              password: hashedPassword,
+              isAdmin: false
+            });
+          }
+
+          const user = users.get(email);
+          if (!user) {
+            return done(null, false);
+          }
+
+          const passwordValid = await comparePasswords(password, user.password);
+          if (!passwordValid) {
+            return done(null, false);
+          }
+
+          return done(null, user);
+        } catch (err) {
+          return done(err);
+        }
+      }
+    )
+  );
+
+  passport.serializeUser((user: any, done) => {
+    done(null, user.id);
+  });
+
+  passport.deserializeUser((id: number, done) => {
+    const user = Array.from(users.values()).find(u => u.id === id);
+    done(null, user);
+  });
+
+  // Authentication routes
+  app.post("/api/login", (req, res, next) => {
+    passport.authenticate("local", (err, user, info) => {
+      if (err) {
+        return res.status(500).json({ message: "Internal server error during login" });
+      }
+      if (!user) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      req.logIn(user, (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Internal server error during login" });
+        }
+        return res.json(user);
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/logout", (req, res) => {
+    req.logout(() => {
+      res.sendStatus(200);
+    });
+  });
+
+  app.get("/api/user", (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    res.json(req.user);
+  });
+
+  return { hashPassword };
+}
+```
+
+### 11. server/health-check.ts
+```typescript
+import { storage } from "./storage";
+import { db, checkDatabaseConnection } from "./db";
+import { sql } from "drizzle-orm";
+import { users, projects, subscriptions } from "@shared/schema";
+
+interface HealthCheckResult {
+  status: 'healthy' | 'unhealthy';
+  components: {
+    [key: string]: {
+      status: 'healthy' | 'unhealthy';
+      error?: string;
+      details?: any;
+    };
+  };
+  timestamp: string;
+}
+
+export async function performHealthCheck(): Promise<HealthCheckResult> {
+  const result: HealthCheckResult = {
+    status: 'healthy',
+    components: {},
+    timestamp: new Date().toISOString()
+  };
+
+  // Check database connection
+  try {
+    const isConnected = await checkDatabaseConnection();
+    if (!isConnected) {
+      throw new Error('Database connection failed after retries');
+    }
+    result.components.database = { 
+      status: 'healthy',
+      details: { connection: 'established' }
+    };
+  } catch (error) {
+    result.components.database = {
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Unknown database error',
+      details: { connection: 'failed' }
+    };
+    result.status = 'unhealthy';
+  }
+
+  // Check critical tables
+  try {
+    const [usersCount] = await db.select({ count: sql`count(*)` }).from(users);
+    const [projectsCount] = await db.select({ count: sql`count(*)` }).from(projects);
+    const [subscriptionsCount] = await db.select({ count: sql`count(*)` }).from(subscriptions);
+
+    result.components.tables = { 
+      status: 'healthy',
+      details: {
+        users: usersCount,
+        projects: projectsCount,
+        subscriptions: subscriptionsCount
+      }
+    };
+  } catch (error) {
+    result.components.tables = {
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Table check failed',
+      details: { lastChecked: new Date().toISOString() }
+    };
+    result.status = 'unhealthy';
+  }
+
+  // Check storage methods
+  try {
+    await storage.getUsers();
+    result.components.storage = { status: 'healthy' };
+  } catch (error) {
+    result.components.storage = {
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Storage methods check failed'
+    };
+    result.status = 'unhealthy';
+  }
+
+  return result;
+}
+```
+
+### 12. server/services/ai/project-optimizer.ts
+```typescript
+import type { GrokService } from '../grok';
+import { storage } from '../../storage';
+
+export class ProjectOptimizer {
+  constructor(private grokService: GrokService) {}
+
+  async getOptimizations(projectId: number) {
+    const project = await storage.getProjectById(projectId);
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    const [
+      phaseAnalysis,
+      taskSuggestions,
+      riskAssessment
+    ] = await Promise.all([
+      this.grokService.analyzeProjectPhase(project),
+      this.grokService.generateTaskSuggestions(project),
+      this.grokService.assessProjectRisks(project)
+    ]);
+
+    return {
+      currentPhase: {
+        analysis: phaseAnalysis,
+        recommendedTasks: taskSuggestions
+      },
+      risks: riskAssessment,
+      nextSteps: await this.generateNextSteps(project, phaseAnalysis)
+    };
+  }
+
+  async generateRecommendations() {
+    return {
+      codebase: {
+        type: 'improvement',
+        priority: 'medium',
+        description: 'Consider implementing unit tests for critical components',
+        impact: 'Improved code reliability and maintainability'
+      },
+      architecture: {
+        type: 'optimization',
+        priority: 'high',
+        description: 'Implement caching for frequently accessed project data',
+        impact: 'Enhanced application performance'
+      },
+      features: {
+        type: 'addition',
+        priority: 'medium',
+        description: 'Add bulk operations for material management',
+        impact: 'Improved user workflow efficiency'
+      }
+    };
+  }
+
+  private async generateNextSteps(project: any, analysis: any) {
+    return {
+      immediate: [
+        'Complete remaining phase tasks',
+        'Review risk assessment findings',
+        'Update project documentation'
+      ],
+      shortTerm: [
+        'Plan next phase transition',
+        'Prepare stakeholder review meeting'
+      ],
+      longTerm: [
+        'Consider implementing suggested optimizations',
+        'Review project timeline and adjust if needed'
+      ]
+    };
+  }
+}
+```
+
+### 13. server/services/ai/document-analysis.ts
+```typescript
+import OpenAI from "openai";
+import { DocumentChange } from "@shared/schema";
+import * as diff from "diff";
+import { readFile } from "fs/promises";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+export async function analyzeDocumentChanges(oldPath: string, newPath: string, mimeType?: string): Promise<string> {
+  try {
+    if (mimeType === 'application/pdf') {
+      return "PDF document uploaded successfully. Content analysis not available for binary files.";
+    }
+
+    const oldContent = await readFile(oldPath, 'utf8');
+    const newContent = await readFile(newPath, 'utf8');
+
+    const changes = diff.diffChars(oldContent, newContent);
+    const summary = changes.reduce((acc, change) => {
+      if (change.added) return acc + `Added: ${change.value.length} characters\n`;
+      if (change.removed) return acc + `Removed: ${change.value.length} characters\n`;
+      return acc;
+    }, '');
+
+    return `Document changes analyzed: \n${summary}`;
+  } catch (error) {
+    console.error("Error analyzing document changes:", error);
+    return "Unable to analyze document changes at this time.";
+  }
+}
+
+export function formatChangesForDisplay(oldContent: string, newContent: string): any[] {
+  return [{
+    id: 1,
+    type: 'modification',
+    content: 'Document version updated',
+    metadata: {
+      timestamp: new Date().toISOString()
+    }
+  }];
+}
+```
+
+### 14. server/storage.ts
+```typescript
+import {
+  users, projects, documentVersions,
+  type User, type InsertUser,
+  type Project, type InsertProject,
+  type DocumentVersion, type InsertDocumentVersion
+} from "@shared/schema";
+
+export interface IStorage {
+  // User methods
+  getUsers(): Promise<User[]>;
+  getUserById(id: number): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+
+  // Project methods
+  getProjects(): Promise<Project[]>;
+  getProjectById(id: number): Promise<Project | undefined>;
+  createProject(project: InsertProject): Promise<Project>;
+
+  // Document methods
+  getDocuments(): Promise<DocumentVersion[]>;
+  getDocumentById(id: number): Promise<DocumentVersion | undefined>;
+  createDocument(document: InsertDocumentVersion): Promise<DocumentVersion>;
+  getDocumentVersions(drawingId: number): Promise<DocumentVersion[]>;
+}
+
+export class MemStorage implements IStorage {
+  private users: User[] = [];
+  private projects: Project[] = [];
+  private documents: DocumentVersion[] = [];
+  private nextId = 1;
+
+  constructor() {
+    // Initialize with sample data
+    this.initializeSampleData();
+  }
+
+  private initializeSampleData() {
+    // Sample user
+    const user: User = {
+      id: this.nextId++,
+      email: "demo@takeoffpro.com",
+      name: "Demo User",
+      password: "hashed_password",
+      role: "user",
+      preferences: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    this.users.push(user);
+
+    // Sample projects
+    const projects: Project[] = [
+      {
+        id: this.nextId++,
+        name: "Commercial Mall Renovation",
+        description: "Major renovation project for downtown shopping mall",
+        status: "in_progress",
+        progress: "40%",
+        currentPhase: "construction",
+        startDate: new Date(),
+        endDate: new Date(),
+        budget: 2500000,
+        actualCost: 1000000,
+        constructionDetails: {
+          budget: 2500000,
+          teamSize: 45,
+          location: "123 Main Street",
+          trades: ["electrical", "plumbing", "structural"],
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        userId: user.id,
+        risks: {}
+      }
+    ];
+    this.projects.push(...projects);
+
+    // Sample documents with versions
+    const documents: DocumentVersion[] = [
+      {
+        id: this.nextId++,
+        projectId: projects[0].id,
+        name: "Floor Plans - Level 1",
+        documentPath: "/drawings/floor-plans-l1.pdf",
+        version: 1,
+        scale: "1:100",
+        fileHash: "abc123",
+        fileSize: 2500000,
+        mimeType: "application/pdf",
+        uploadedBy: user.id,
+        createdAt: new Date(),
+        uploadDate: new Date(),
+        layers: ["walls", "dimensions", "furniture"],
+        metadata: {
+          revision: "A",
+          status: "FOR REVIEW",
+          designer: "John Architect"
+        }
+      }
+    ];
+    this.documents.push(...documents);
+  }
+
+  // Implementation of IStorage methods
+  async getUsers(): Promise<User[]> {
+    return this.users;
+  }
+
+  async getUserById(id: number): Promise<User | undefined> {
+    return this.users.find(u => u.id === id);
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return this.users.find(u => u.email === email);
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const user = {
+      id: this.nextId++,
+      ...insertUser,
+      role: "user",
+      preferences: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    this.users.push(user);
+    return user;
+  }
+
+  async getProjects(): Promise<Project[]> {
+    return this.projects;
+  }
+
+  async getProjectById(id: number): Promise<Project | undefined> {
+    return this.projects.find(p => p.id === id);
+  }
+
+  async createProject(insertProject: InsertProject): Promise<Project> {
+    const project = {
+      id: this.nextId++,
+      userId: 1, // Default user ID for demo
+      startDate: new Date(),
+      endDate: new Date(),
+      budget: 0,
+      actualCost: 0,
+      risks: {},
+      ...insertProject,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.projects.push(project);
+    return project;
+  }
+
+  async getDocuments(): Promise<DocumentVersion[]> {
+    return this.documents;
+  }
+
+  async getDocumentById(id: number): Promise<DocumentVersion | undefined> {
+    return this.documents.find(d => d.id === id);
+  }
+
+  async createDocument(insertDocument: InsertDocumentVersion): Promise<DocumentVersion> {
+    const document = {### 15. server/routes.ts
+```typescript
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import projectsRouter from "./routes/projects";
+import criticalPathRouter from "./routes/critical-path";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Basic health check route
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // Register feature routes
+  app.use("/api/projects", projectsRouter);
+  app.use("/api/critical-path", criticalPathRouter);
+
+  const httpServer = createServer(app);
+  return httpServer;
+}
+```
+
+### Additional Dependencies to Install
+```bash
+npm install passport passport-local express-session memorystore @types/passport @types/passport-local @types/express-session openai diff @types/diff
+```
+
+### Environment Variable Updates
+```env
+OPENAI_API_KEY=your_openai_api_key
+SESSION_SECRET=your_session_secret

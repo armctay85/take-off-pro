@@ -3,17 +3,22 @@ import type { Express } from "express";
 import { createServer } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertTaskSchema, insertResourceSchema, insertResourceAssignmentSchema } from "@shared/schema";
+import { fromZodError } from "zod-validation-error";
 
 export async function registerRoutes(app: Express) {
   const apiRouter = Router();
 
   // Project routes
-  apiRouter.get("/projects", async (req, res) => {
+  apiRouter.get("/projects", async (_req, res) => {
     try {
       const projects = await storage.getProjects();
       res.json(projects);
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch projects" });
+      console.error("Failed to fetch projects:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch projects",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   });
 
@@ -33,7 +38,14 @@ export async function registerRoutes(app: Express) {
       const project = await storage.createProject(projectData);
       res.status(201).json(project);
     } catch (error) {
-      res.status(400).json({ error: "Invalid project data" });
+      if (error instanceof Error) {
+        res.status(400).json({ 
+          error: "Invalid project data",
+          details: fromZodError(error).message
+        });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   });
 
@@ -61,12 +73,16 @@ export async function registerRoutes(app: Express) {
   });
 
   // Resource routes
-  apiRouter.get("/resources", async (req, res) => {
+  apiRouter.get("/resources", async (_req, res) => {
     try {
       const resources = await storage.getResources();
       res.json(resources);
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch resources" });
+      console.error("Failed to fetch resources:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch resources",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   });
 
@@ -76,7 +92,14 @@ export async function registerRoutes(app: Express) {
       const resource = await storage.createResource(resourceData);
       res.status(201).json(resource);
     } catch (error) {
-      res.status(400).json({ error: "Invalid resource data" });
+      if (error instanceof Error) {
+        res.status(400).json({ 
+          error: "Invalid resource data",
+          details: fromZodError(error).message
+        });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   });
 
@@ -113,6 +136,7 @@ export async function registerRoutes(app: Express) {
     }
   });
 
+  // Mount API routes
   app.use("/api", apiRouter);
   return createServer(app);
 }
