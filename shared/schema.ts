@@ -54,11 +54,39 @@ export const criticalPaths = pgTable("critical_paths", {
   slack: integer("slack").notNull()
 });
 
-// Create insert schemas
-export const insertProjectSchema = createInsertSchema(projects);
-export const insertTaskSchema = createInsertSchema(tasks);
-export const insertResourceSchema = createInsertSchema(resources);
-export const insertResourceAssignmentSchema = createInsertSchema(resourceAssignments);
+// Create insert schemas with proper validation
+export const insertProjectSchema = createInsertSchema(projects, {
+  name: z.string().min(1, "Project name is required"),
+  description: z.string().nullable(),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+  budget: z.string().transform(val => parseFloat(val)),
+  status: z.string().default('active')
+});
+
+export const insertTaskSchema = createInsertSchema(tasks, {
+  projectId: z.coerce.number(),
+  name: z.string().min(1, "Task name is required"),
+  description: z.string().nullable(),
+  duration: z.coerce.number().min(1, "Duration must be at least 1 day"),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+  dependsOn: z.coerce.number().nullable(),
+  completed: z.boolean().default(false)
+});
+
+export const insertResourceSchema = createInsertSchema(resources, {
+  name: z.string().min(1, "Resource name is required"),
+  role: z.string().min(1, "Role is required"),
+  costPerHour: z.string().transform(val => parseFloat(val))
+});
+
+export const insertResourceAssignmentSchema = createInsertSchema(resourceAssignments, {
+  taskId: z.coerce.number(),
+  resourceId: z.coerce.number(),
+  hours: z.coerce.number().min(0, "Hours must be non-negative")
+});
+
 export const insertCriticalPathSchema = createInsertSchema(criticalPaths);
 
 // Export types

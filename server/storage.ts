@@ -3,8 +3,15 @@ import {
   Task, InsertTask,
   Resource, InsertResource,
   ResourceAssignment, InsertResourceAssignment,
-  CriticalPath, InsertCriticalPath
+  CriticalPath, InsertCriticalPath,
+  projects,
+  tasks,
+  resources,
+  resourceAssignments,
+  criticalPaths
 } from "@shared/schema";
+import { db } from './db';
+import { eq } from 'drizzle-orm';
 
 export interface IStorage {
   // Project operations
@@ -38,155 +45,126 @@ export interface IStorage {
   updateCriticalPath(projectId: number, paths: InsertCriticalPath[]): Promise<CriticalPath[]>;
 }
 
-export class MemStorage implements IStorage {
-  private projects: Map<number, Project>;
-  private tasks: Map<number, Task>;
-  private resources: Map<number, Resource>;
-  private resourceAssignments: Map<number, ResourceAssignment>;
-  private criticalPaths: Map<number, CriticalPath>;
-  private currentIds: { [key: string]: number };
-
-  constructor() {
-    this.projects = new Map();
-    this.tasks = new Map();
-    this.resources = new Map();
-    this.resourceAssignments = new Map();
-    this.criticalPaths = new Map();
-    this.currentIds = {
-      projects: 1,
-      tasks: 1,
-      resources: 1,
-      resourceAssignments: 1,
-      criticalPaths: 1
-    };
-  }
-
+export class PostgresStorage implements IStorage {
   // Project operations
   async getProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values());
+    return await db.select().from(projects);
   }
 
   async getProject(id: number): Promise<Project | undefined> {
-    return this.projects.get(id);
+    const result = await db.select().from(projects).where(eq(projects.id, id));
+    return result[0];
   }
 
   async createProject(project: InsertProject): Promise<Project> {
-    const id = this.currentIds.projects++;
-    const newProject = { ...project, id } as Project;
-    this.projects.set(id, newProject);
-    return newProject;
+    const result = await db.insert(projects).values(project).returning();
+    return result[0];
   }
 
   async updateProject(id: number, project: Partial<Project>): Promise<Project> {
-    const existing = this.projects.get(id);
-    if (!existing) throw new Error('Project not found');
-    const updated = { ...existing, ...project };
-    this.projects.set(id, updated);
-    return updated;
+    const result = await db
+      .update(projects)
+      .set(project)
+      .where(eq(projects.id, id))
+      .returning();
+    return result[0];
   }
 
   async deleteProject(id: number): Promise<void> {
-    this.projects.delete(id);
+    await db.delete(projects).where(eq(projects.id, id));
   }
 
   // Task operations
   async getTasks(projectId: number): Promise<Task[]> {
-    return Array.from(this.tasks.values()).filter(task => task.projectId === projectId);
+    return await db.select().from(tasks).where(eq(tasks.projectId, projectId));
   }
 
   async getTask(id: number): Promise<Task | undefined> {
-    return this.tasks.get(id);
+    const result = await db.select().from(tasks).where(eq(tasks.id, id));
+    return result[0];
   }
 
   async createTask(task: InsertTask): Promise<Task> {
-    const id = this.currentIds.tasks++;
-    const newTask = { ...task, id } as Task;
-    this.tasks.set(id, newTask);
-    return newTask;
+    const result = await db.insert(tasks).values(task).returning();
+    return result[0];
   }
 
   async updateTask(id: number, task: Partial<Task>): Promise<Task> {
-    const existing = this.tasks.get(id);
-    if (!existing) throw new Error('Task not found');
-    const updated = { ...existing, ...task };
-    this.tasks.set(id, updated);
-    return updated;
+    const result = await db
+      .update(tasks)
+      .set(task)
+      .where(eq(tasks.id, id))
+      .returning();
+    return result[0];
   }
 
   async deleteTask(id: number): Promise<void> {
-    this.tasks.delete(id);
+    await db.delete(tasks).where(eq(tasks.id, id));
   }
 
   // Resource operations
   async getResources(): Promise<Resource[]> {
-    return Array.from(this.resources.values());
+    return await db.select().from(resources);
   }
 
   async getResource(id: number): Promise<Resource | undefined> {
-    return this.resources.get(id);
+    const result = await db.select().from(resources).where(eq(resources.id, id));
+    return result[0];
   }
 
   async createResource(resource: InsertResource): Promise<Resource> {
-    const id = this.currentIds.resources++;
-    const newResource = { ...resource, id } as Resource;
-    this.resources.set(id, newResource);
-    return newResource;
+    const result = await db.insert(resources).values(resource).returning();
+    return result[0];
   }
 
   async updateResource(id: number, resource: Partial<Resource>): Promise<Resource> {
-    const existing = this.resources.get(id);
-    if (!existing) throw new Error('Resource not found');
-    const updated = { ...existing, ...resource };
-    this.resources.set(id, updated);
-    return updated;
+    const result = await db
+      .update(resources)
+      .set(resource)
+      .where(eq(resources.id, id))
+      .returning();
+    return result[0];
   }
 
   async deleteResource(id: number): Promise<void> {
-    this.resources.delete(id);
+    await db.delete(resources).where(eq(resources.id, id));
   }
 
   // Resource assignment operations
   async getResourceAssignments(taskId: number): Promise<ResourceAssignment[]> {
-    return Array.from(this.resourceAssignments.values())
-      .filter(assignment => assignment.taskId === taskId);
+    return await db
+      .select()
+      .from(resourceAssignments)
+      .where(eq(resourceAssignments.taskId, taskId));
   }
 
   async createResourceAssignment(assignment: InsertResourceAssignment): Promise<ResourceAssignment> {
-    const id = this.currentIds.resourceAssignments++;
-    const newAssignment = { ...assignment, id } as ResourceAssignment;
-    this.resourceAssignments.set(id, newAssignment);
-    return newAssignment;
+    const result = await db.insert(resourceAssignments).values(assignment).returning();
+    return result[0];
   }
 
   async deleteResourceAssignment(id: number): Promise<void> {
-    this.resourceAssignments.delete(id);
+    await db.delete(resourceAssignments).where(eq(resourceAssignments.id, id));
   }
 
   // Critical path operations
   async getCriticalPath(projectId: number): Promise<CriticalPath[]> {
-    return Array.from(this.criticalPaths.values())
-      .filter(path => path.projectId === projectId);
+    return await db
+      .select()
+      .from(criticalPaths)
+      .where(eq(criticalPaths.projectId, projectId));
   }
 
   async updateCriticalPath(projectId: number, paths: InsertCriticalPath[]): Promise<CriticalPath[]> {
-    // Remove existing critical paths for this project
-    for (const [id, path] of this.criticalPaths) {
-      if (path.projectId === projectId) {
-        this.criticalPaths.delete(id);
-      }
-    }
+    // First delete existing paths
+    await db.delete(criticalPaths).where(eq(criticalPaths.projectId, projectId));
 
-    // Add new critical paths
-    const newPaths: CriticalPath[] = [];
-    for (const path of paths) {
-      const id = this.currentIds.criticalPaths++;
-      const newPath = { ...path, id } as CriticalPath;
-      this.criticalPaths.set(id, newPath);
-      newPaths.push(newPath);
+    // Then insert new paths
+    if (paths.length > 0) {
+      return await db.insert(criticalPaths).values(paths).returning();
     }
-
-    return newPaths;
+    return [];
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PostgresStorage();
