@@ -27,7 +27,7 @@ export const tasks = pgTable("tasks", {
   completed: boolean("completed").notNull().default(false)
 });
 
-// Define relations including self-referential
+// Define relations
 export const tasksRelations = relations(tasks, ({ one }) => ({
   project: one(projects, {
     fields: [tasks.projectId],
@@ -67,14 +67,14 @@ export const criticalPaths = pgTable("critical_paths", {
   slack: integer("slack").notNull()
 });
 
-// Create insert schemas with proper validation
+// Insert schemas with proper validation and type coercion
 export const insertProjectSchema = createInsertSchema(projects, {
   name: z.string().min(1, "Project name is required"),
   description: z.string().nullable(),
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
-  budget: z.string().transform(val => parseFloat(val)),
-  status: z.string().default('active')
+  budget: z.coerce.number().min(0, "Budget must be non-negative"),
+  status: z.enum(['active', 'completed', 'on-hold']).default('active')
 });
 
 export const insertTaskSchema = createInsertSchema(tasks, {
@@ -91,7 +91,7 @@ export const insertTaskSchema = createInsertSchema(tasks, {
 export const insertResourceSchema = createInsertSchema(resources, {
   name: z.string().min(1, "Resource name is required"),
   role: z.string().min(1, "Role is required"),
-  costPerHour: z.string().transform(val => parseFloat(val))
+  costPerHour: z.coerce.number().min(0, "Cost per hour must be non-negative")
 });
 
 export const insertResourceAssignmentSchema = createInsertSchema(resourceAssignments, {
@@ -100,7 +100,15 @@ export const insertResourceAssignmentSchema = createInsertSchema(resourceAssignm
   hours: z.coerce.number().min(0, "Hours must be non-negative")
 });
 
-export const insertCriticalPathSchema = createInsertSchema(criticalPaths);
+export const insertCriticalPathSchema = createInsertSchema(criticalPaths, {
+  projectId: z.coerce.number(),
+  taskId: z.coerce.number(),
+  earliestStart: z.coerce.date(),
+  earliestFinish: z.coerce.date(),
+  latestStart: z.coerce.date(),
+  latestFinish: z.coerce.date(),
+  slack: z.coerce.number()
+});
 
 // Export types
 export type Project = typeof projects.$inferSelect;
