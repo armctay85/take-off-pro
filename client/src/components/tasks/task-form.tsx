@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,16 +21,21 @@ export default function TaskForm({ projectId, onSuccess }: TaskFormProps) {
     queryKey: ["/api/resources"],
   });
 
+  const defaultStartDate = new Date();
+  const defaultEndDate = new Date();
+  defaultEndDate.setDate(defaultEndDate.getDate() + 1);
+
   const form = useForm<InsertTask>({
     resolver: zodResolver(insertTaskSchema),
     defaultValues: {
-      projectId,
+      projectId: projectId.toString(),
       name: "",
       description: "",
-      duration: 1,
-      startDate: new Date().toISOString(),
-      endDate: new Date().toISOString(),
-      completed: false
+      duration: "1",
+      startDate: defaultStartDate.toISOString().slice(0, 16),
+      endDate: defaultEndDate.toISOString().slice(0, 16),
+      completed: false,
+      dependsOn: null
     }
   });
 
@@ -101,7 +105,7 @@ export default function TaskForm({ projectId, onSuccess }: TaskFormProps) {
                   type="number" 
                   min="1"
                   {...field} 
-                  onChange={e => field.onChange(parseInt(e.target.value))}
+                  onChange={e => field.onChange(e.target.value)}
                 />
               </FormControl>
             </FormItem>

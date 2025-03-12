@@ -15,13 +15,15 @@ interface ProjectFormProps {
 
 export default function ProjectForm({ onSuccess }: ProjectFormProps) {
   const { toast } = useToast();
-  
+
   const form = useForm<InsertProject>({
     resolver: zodResolver(insertProjectSchema),
     defaultValues: {
       name: "",
       description: "",
-      budget: 0,
+      budget: "0",
+      startDate: new Date().toISOString(),
+      endDate: new Date().toISOString(),
       status: "active"
     }
   });
@@ -86,17 +88,53 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
           name="budget"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Budget</FormLabel>
+              <FormLabel>Budget ($)</FormLabel>
               <FormControl>
                 <Input 
                   type="number" 
-                  {...field} 
-                  onChange={e => field.onChange(parseFloat(e.target.value))}
+                  min="0"
+                  step="0.01"
+                  {...field}
+                  onChange={e => field.onChange(e.target.value)}
                 />
               </FormControl>
             </FormItem>
           )}
         />
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name="startDate"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Start Date</FormLabel>
+                <FormControl>
+                  <Input 
+                    type="datetime-local" 
+                    {...field}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="endDate"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>End Date</FormLabel>
+                <FormControl>
+                  <Input 
+                    type="datetime-local" 
+                    {...field}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        </div>
 
         <div className="flex justify-end gap-2">
           <Button type="submit" disabled={mutation.isPending}>

@@ -20,7 +20,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
     defaultValues: {
       name: "",
       role: "",
-      costPerHour: 0
+      costPerHour: "0"
     }
   });
 
@@ -91,7 +91,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
                   min="0"
                   step="0.01"
                   {...field}
-                  onChange={e => field.onChange(parseFloat(e.target.value))}
+                  onChange={e => field.onChange(e.target.value)}
                 />
               </FormControl>
             </FormItem>
