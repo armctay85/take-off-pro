@@ -1,6 +1,7 @@
 import { pgTable, text, serial, integer, decimal, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { relations } from 'drizzle-orm';
 
 // Project table
 export const projects = pgTable("projects", {
@@ -16,15 +17,27 @@ export const projects = pgTable("projects", {
 // Tasks table
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").references(() => projects.id).notNull(),
+  projectId: integer("project_id").notNull().references(() => projects.id),
   name: text("name").notNull(),
   description: text("description"),
   duration: integer("duration").notNull(),
   startDate: timestamp("start_date").notNull(),
   endDate: timestamp("end_date").notNull(),
-  dependsOn: integer("depends_on").references(() => tasks.id),
+  dependsOn: integer("depends_on"),
   completed: boolean("completed").notNull().default(false)
 });
+
+// Define relations including self-referential
+export const tasksRelations = relations(tasks, ({ one }) => ({
+  project: one(projects, {
+    fields: [tasks.projectId],
+    references: [projects.id],
+  }),
+  dependentTask: one(tasks, {
+    fields: [tasks.dependsOn],
+    references: [tasks.id],
+  }),
+}));
 
 // Resources table
 export const resources = pgTable("resources", {
@@ -37,16 +50,16 @@ export const resources = pgTable("resources", {
 // Resource assignments table
 export const resourceAssignments = pgTable("resource_assignments", {
   id: serial("id").primaryKey(),
-  taskId: integer("task_id").references(() => tasks.id).notNull(),
-  resourceId: integer("resource_id").references(() => resources.id).notNull(),
+  taskId: integer("task_id").notNull().references(() => tasks.id),
+  resourceId: integer("resource_id").notNull().references(() => resources.id),
   hours: integer("hours").notNull()
 });
 
 // Critical path table
 export const criticalPaths = pgTable("critical_paths", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").references(() => projects.id).notNull(),
-  taskId: integer("task_id").references(() => tasks.id).notNull(),
+  projectId: integer("project_id").notNull().references(() => projects.id),
+  taskId: integer("task_id").notNull().references(() => tasks.id),
   earliestStart: timestamp("earliest_start").notNull(),
   earliestFinish: timestamp("earliest_finish").notNull(),
   latestStart: timestamp("latest_start").notNull(),
