@@ -1,0 +1,354 @@
+# Take-off Pro Migration Guide
+Date: March 12, 2025
+
+## Step 1: Create New Project
+1. Create a new Node.js Replit project
+2. Install core dependencies:
+```bash
+npm install @vitejs/plugin-react vite express cors @tanstack/react-query wouter react react-dom @hookform/resolvers zod drizzle-orm drizzle-zod multer
+```
+
+## Step 2: Set Up Project Structure
+Create the following directory structure:
+```
+/
+├── client/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── lib/
+│   │   ├── pages/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   └── index.html
+├── server/
+│   ├── routes/
+│   ├── index.ts
+│   └── vite.ts
+├── shared/
+│   └── schema.ts
+└── public/
+```
+
+## Step 3: Configure Environment Variables
+Create a `.env` file with:
+```env
+PORT=5000
+NODE_ENV=development
+VITE_API_URL=http://localhost:5000
+VITE_ALLOWED_HOSTS=all
+```
+
+## Step 4: Core Files Implementation
+
+### server/index.ts
+```typescript
+import express from "express";
+import { createServer } from "http";
+import { registerRoutes } from "./routes";
+import { setupVite } from "./vite";
+import cors from "cors";
+import { performHealthCheck } from "./health-check";
+
+const app = express();
+const httpServer = createServer(app);
+const PORT = process.env.PORT || 5000;
+
+// Basic middleware setup
+app.use(express.json());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+// Register API routes
+registerRoutes(app);
+
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  const healthCheck = await performHealthCheck();
+  res.json(healthCheck);
+});
+
+async function startServer() {
+  try {
+    console.log('Starting API server...');
+    await setupVite(app, httpServer);
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
+```
+
+### server/vite.ts
+```typescript
+import { createServer } from 'http';
+import { ViteDevServer } from 'vite';
+import express from 'express';
+
+export async function setupVite(app: express.Express, server: createServer) {
+    const vite = await import('vite');
+    const viteServer = await vite.createServer({
+        server: { middlewareMode: true },
+    });
+    app.use(viteServer.middlewares);
+}
+```
+
+### client/src/App.tsx
+```typescript
+import { Switch, Route } from "wouter";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./lib/queryClient";
+import { Toaster } from "@/components/ui/toaster";
+
+// Page components
+import ProjectsPage from "./pages/projects";
+import DrawingsPage from "./pages/drawings";
+import CostPlanPage from "./pages/projects/cost-plan";
+import NotFound from "./pages/not-found";
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <div className="min-h-screen bg-background">
+        <Switch>
+          <Route path="/" component={ProjectsPage} />
+          <Route path="/drawings" component={DrawingsPage} />
+          <Route path="/projects/cost-plan" component={CostPlanPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </div>
+      <Toaster />
+    </QueryClientProvider>
+  );
+}
+```
+
+### client/src/lib/queryClient.ts
+```typescript
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+export async function apiRequest(
+  method: string,
+  url: string,
+  data?: unknown | undefined,
+): Promise<Response> {
+  const apiUrl = `${API_URL}${url}`;
+  const res = await fetch(apiUrl, {
+    method,
+    headers: data ? { "Content-Type": "application/json" } : {},
+    body: data ? JSON.stringify(data) : undefined,
+    credentials: "include",
+  });
+  await throwIfResNotOk(res);
+  return res;
+}
+
+async function throwIfResNotOk(res: Response) {
+  if (!res.ok) {
+    const errorData = await res.json();
+    const errorMessage = errorData.message || res.statusText;
+    throw new Error(errorMessage);
+  }
+}
+```
+
+### tsconfig.json
+```json
+{
+  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "compilerOptions": {
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
+    "noEmit": true,
+    "module": "ESNext",
+    "strict": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@/*": ["./client/src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  }
+}
+```
+
+### server/routes/projects.ts
+```typescript
+import { Router } from "express";
+import { db } from "../db";
+import { eq } from "drizzle-orm";
+import { 
+  projects, 
+  insertProjectSchema,
+  projectTasks,
+  criticalPaths,
+  resources,
+  resourceAssignments 
+} from "@shared/schema";
+
+const router = Router();
+
+// Get all projects with enhanced details
+router.get("/", async (_req, res) => {
+  try {
+    const projectsList = await db
+      .select({
+        project: projects,
+        taskCount: projectTasks,
+        criticalTaskCount: criticalPaths,
+        resourceCount: resourceAssignments
+      })
+      .from(projects)
+      .leftJoin(projectTasks, eq(projects.id, projectTasks.projectId))
+      .leftJoin(criticalPaths, eq(projects.id, criticalPaths.projectId))
+      .leftJoin(resourceAssignments, eq(projectTasks.id, resourceAssignments.taskId));
+
+    // Group and format the results
+    const formattedProjects = projectsList.reduce((acc, curr) => {
+      if (!acc[curr.project.id]) {
+        acc[curr.project.id] = {
+          ...curr.project,
+          taskCount: 0,
+          criticalTaskCount: 0,
+          assignedResources: 0
+        };
+      }
+      if (curr.taskCount) acc[curr.project.id].taskCount++;
+      if (curr.criticalTaskCount) acc[curr.project.id].criticalTaskCount++;
+      if (curr.resourceCount) acc[curr.project.id].assignedResources++;
+      return acc;
+    }, {} as Record<number, any>);
+
+    res.json(Object.values(formattedProjects));
+  } catch (error) {
+    console.error("Failed to fetch projects:", error);
+    res.status(500).json({
+      error: "Failed to fetch projects",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Other project routes remain unchanged
+```
+
+### server/routes/critical-path.ts
+```typescript
+import { Router } from "express";
+import { db } from "../db";
+import { eq, and } from "drizzle-orm";
+import { 
+  projectTasks,
+  criticalPaths,
+  resources,
+  resourceAssignments,
+  insertProjectTaskSchema,
+  insertCriticalPathSchema,
+  insertResourceAssignmentSchema 
+} from "@shared/schema";
+
+const router = Router();
+
+// Get all tasks for a project with critical path analysis
+router.get("/:projectId", async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.projectId);
+    const tasks = await db
+      .select({
+        task: projectTasks,
+        criticalPath: criticalPaths,
+        resources: resourceAssignments
+      })
+      .from(projectTasks)
+      .leftJoin(criticalPaths, eq(projectTasks.id, criticalPaths.taskId))
+      .leftJoin(resourceAssignments, eq(projectTasks.id, resourceAssignments.taskId))
+      .where(eq(projectTasks.projectId, projectId));
+
+    // Group tasks with their resources and critical path info
+    const groupedTasks = tasks.reduce((acc, curr) => {
+      if (!acc[curr.task.id]) {
+        acc[curr.task.id] = {
+          ...curr.task,
+          criticalPath: curr.criticalPath,
+          resources: []
+        };
+      }
+      if (curr.resources) {
+        acc[curr.task.id].resources.push(curr.resources);
+      }
+      return acc;
+    }, {} as Record<number, any>);
+
+    res.json(Object.values(groupedTasks));
+  } catch (error) {
+    console.error("Failed to fetch critical path:", error);
+    res.status(500).json({
+      error: "Failed to fetch critical path",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+// Other critical path routes remain unchanged
+```
+
+## Step 5: Start the Application
+Add to package.json:
+```json
+{
+  "scripts": {
+    "dev": "tsx server/index.ts"
+  }
+}
+```
+
+Run the development server:
+```bash
+npm run dev
+```
+
+## Verification Steps
+1. Check that the server starts without errors
+2. Verify the health check endpoint at /api/health
+3. Confirm the frontend loads without host validation errors
+4. Test the basic routing functionality
+
+## Troubleshooting
+If you encounter host validation issues:
+1. Verify VITE_ALLOWED_HOSTS is set to "all"
+2. Ensure the server is listening on 0.0.0.0
+3. Check that the port configuration matches (5000)
+4. Clear browser cache and restart the development server
+
+## Additional Setup Steps
+
+### Database Configuration
+1. Create a new PostgreSQL database using the create_postgresql_database_tool
+2. The database URL and credentials will be automatically added to environment variables
+
+### Install Additional Dependencies
+```bash
+npm install @tanstack/react-query-devtools lucide-react @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-tooltip
+```
+
+### Final Verification
+1. Check database connectivity
+2. Verify all API endpoints (/api/projects, /api/critical-path)
+3. Test the project creation and management features
+4. Validate the critical path analysis functionality
+
+Remember to clear your browser cache and restart the development server after completing the migration.
