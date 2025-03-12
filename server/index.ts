@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { performHealthCheck } from "./health-check";
+import { setupWebSocketServer } from "./services/websocket";
 
 const app = express();
 app.use(express.json());
@@ -46,6 +47,9 @@ app.get('/api/health', async (_req, res) => {
 
 (async () => {
   const server = await registerRoutes(app);
+
+  // Setup WebSocket server
+  setupWebSocketServer(server);
 
   // Global error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
