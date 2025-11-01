@@ -4,12 +4,28 @@ import { createServer } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertTaskSchema, insertResourceSchema, insertResourceAssignmentSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
+import { setupAuth, isAuthenticated } from "./replitAuth";
 
 export async function registerRoutes(app: Express) {
+  // Setup authentication first
+  await setupAuth(app);
+
   const apiRouter = Router();
 
-  // Project routes
-  apiRouter.get("/projects", async (_req, res) => {
+  // Auth routes
+  apiRouter.get('/auth/user', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Project routes (protected)
+  apiRouter.get("/projects", isAuthenticated, async (_req, res) => {
     try {
       const projects = await storage.getProjects();
       res.json(projects);
@@ -22,7 +38,7 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  apiRouter.get("/projects/:id", async (req, res) => {
+  apiRouter.get("/projects/:id", isAuthenticated, async (req, res) => {
     try {
       const project = await storage.getProject(parseInt(req.params.id));
       if (!project) return res.status(404).json({ error: "Project not found" });
@@ -32,13 +48,13 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  apiRouter.post("/projects", async (req, res) => {
+  apiRouter.post("/projects", isAuthenticated, async (req, res) => {
     try {
       const projectData = insertProjectSchema.parse(req.body);
       const project = await storage.createProject(projectData);
       res.status(201).json(project);
-    } catch (error) {
-      if (error instanceof Error) {
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
         res.status(400).json({ 
           error: "Invalid project data",
           details: fromZodError(error).message
@@ -49,8 +65,8 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  // Task routes
-  apiRouter.get("/projects/:projectId/tasks", async (req, res) => {
+  // Task routes (protected)
+  apiRouter.get("/projects/:projectId/tasks", isAuthenticated, async (req, res) => {
     try {
       const tasks = await storage.getTasks(parseInt(req.params.projectId));
       res.json(tasks);
@@ -59,7 +75,7 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  apiRouter.post("/projects/:projectId/tasks", async (req, res) => {
+  apiRouter.post("/projects/:projectId/tasks", isAuthenticated, async (req, res) => {
     try {
       const taskData = insertTaskSchema.parse({
         ...req.body,
@@ -72,8 +88,8 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  // Resource routes
-  apiRouter.get("/resources", async (_req, res) => {
+  // Resource routes (protected)
+  apiRouter.get("/resources", isAuthenticated, async (_req, res) => {
     try {
       const resources = await storage.getResources();
       res.json(resources);
@@ -86,13 +102,13 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  apiRouter.post("/resources", async (req, res) => {
+  apiRouter.post("/resources", isAuthenticated, async (req, res) => {
     try {
       const resourceData = insertResourceSchema.parse(req.body);
       const resource = await storage.createResource(resourceData);
       res.status(201).json(resource);
-    } catch (error) {
-      if (error instanceof Error) {
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
         res.status(400).json({ 
           error: "Invalid resource data",
           details: fromZodError(error).message
@@ -103,8 +119,8 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  // Resource assignment routes
-  apiRouter.get("/tasks/:taskId/assignments", async (req, res) => {
+  // Resource assignment routes (protected)
+  apiRouter.get("/tasks/:taskId/assignments", isAuthenticated, async (req, res) => {
     try {
       const assignments = await storage.getResourceAssignments(parseInt(req.params.taskId));
       res.json(assignments);
@@ -113,7 +129,7 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  apiRouter.post("/tasks/:taskId/assignments", async (req, res) => {
+  apiRouter.post("/tasks/:taskId/assignments", isAuthenticated, async (req, res) => {
     try {
       const assignmentData = insertResourceAssignmentSchema.parse({
         ...req.body,
@@ -126,8 +142,8 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  // Critical path routes
-  apiRouter.get("/projects/:projectId/critical-path", async (req, res) => {
+  // Critical path routes (protected)
+  apiRouter.get("/projects/:projectId/critical-path", isAuthenticated, async (req, res) => {
     try {
       const criticalPath = await storage.getCriticalPath(parseInt(req.params.projectId));
       res.json(criticalPath);
