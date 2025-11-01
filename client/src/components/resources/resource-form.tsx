@@ -20,7 +20,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
     defaultValues: {
       name: "",
       role: "",
-      costPerHour: "0"
+      costPerHour: 0
     }
   });
 
@@ -60,7 +60,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
             <FormItem>
               <FormLabel>Resource Name</FormLabel>
               <FormControl>
-                <Input {...field} />
+                <Input {...field} data-testid="input-resource-name" />
               </FormControl>
             </FormItem>
           )}
@@ -73,7 +73,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
             <FormItem>
               <FormLabel>Role</FormLabel>
               <FormControl>
-                <Input {...field} />
+                <Input {...field} data-testid="input-resource-role" />
               </FormControl>
             </FormItem>
           )}
@@ -91,7 +91,9 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
                   min="0"
                   step="0.01"
                   {...field}
-                  onChange={e => field.onChange(e.target.value)}
+                  value={field.value}
+                  onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                  data-testid="input-resource-cost"
                 />
               </FormControl>
             </FormItem>
@@ -99,7 +101,7 @@ export default function ResourceForm({ onSuccess }: ResourceFormProps) {
         />
 
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={mutation.isPending}>
+          <Button type="submit" disabled={mutation.isPending} data-testid="button-submit-resource">
             {mutation.isPending ? "Creating..." : "Create Resource"}
           </Button>
         </div>

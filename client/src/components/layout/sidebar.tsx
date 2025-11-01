@@ -14,8 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Projects", href: "/projects", icon: FolderKanban },
-  { name: "Resources", href: "/resources", icon: Users },
-  { name: "Critical Path", href: "/projects/critical-path", icon: GitFork }
+  { name: "Resources", href: "/resources", icon: Users }
 ];
 
 export default function Sidebar() {

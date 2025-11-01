@@ -13,6 +13,15 @@ interface ProjectFormProps {
   onSuccess?: () => void;
 }
 
+const formatDateTimeLocal = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 export default function ProjectForm({ onSuccess }: ProjectFormProps) {
   const { toast } = useToast();
 
@@ -21,9 +30,9 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
     defaultValues: {
       name: "",
       description: "",
-      budget: "0",
-      startDate: new Date().toISOString(),
-      endDate: new Date().toISOString(),
+      budget: 0,
+      startDate: new Date(),
+      endDate: new Date(),
       status: "active"
     }
   });
@@ -64,7 +73,7 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
             <FormItem>
               <FormLabel>Project Name</FormLabel>
               <FormControl>
-                <Input {...field} />
+                <Input {...field} data-testid="input-project-name" />
               </FormControl>
             </FormItem>
           )}
@@ -77,7 +86,7 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
             <FormItem>
               <FormLabel>Description</FormLabel>
               <FormControl>
-                <Textarea {...field} />
+                <Textarea {...field} value={field.value ?? ""} data-testid="input-project-description" />
               </FormControl>
             </FormItem>
           )}
@@ -95,7 +104,9 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
                   min="0"
                   step="0.01"
                   {...field}
-                  onChange={e => field.onChange(e.target.value)}
+                  value={field.value}
+                  onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                  data-testid="input-project-budget"
                 />
               </FormControl>
             </FormItem>
@@ -112,7 +123,13 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
                 <FormControl>
                   <Input 
                     type="datetime-local" 
-                    {...field}
+                    value={formatDateTimeLocal(field.value)}
+                    onChange={e => field.onChange(new Date(e.target.value))}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                    disabled={field.disabled}
+                    data-testid="input-project-start-date"
                   />
                 </FormControl>
               </FormItem>
@@ -128,7 +145,13 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
                 <FormControl>
                   <Input 
                     type="datetime-local" 
-                    {...field}
+                    value={formatDateTimeLocal(field.value)}
+                    onChange={e => field.onChange(new Date(e.target.value))}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                    disabled={field.disabled}
+                    data-testid="input-project-end-date"
                   />
                 </FormControl>
               </FormItem>
@@ -137,7 +160,7 @@ export default function ProjectForm({ onSuccess }: ProjectFormProps) {
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={mutation.isPending}>
+          <Button type="submit" disabled={mutation.isPending} data-testid="button-submit-project">
             {mutation.isPending ? "Creating..." : "Create Project"}
           </Button>
         </div>
