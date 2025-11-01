@@ -9,14 +9,21 @@ import TaskForm from "@/components/tasks/task-form";
 import { Badge } from "@/components/ui/badge";
 import { Project, Task } from "@shared/schema";
 import { useCollaboration } from "@/hooks/use-collaboration";
+import { useAuth } from "@/hooks/useAuth";
+import { queryClient } from "@/lib/queryClient";
 
 // Add a component to show active users
-const ActiveUsers = ({ userIds }: { userIds: number[] }) => {
+const ActiveUsers = ({ count }: { count: number }) => {
   return (
     <div className="flex items-center gap-2">
-      <Users className="h-4 w-4 text-muted-foreground" />
+      <div className="relative">
+        <Users className="h-4 w-4 text-muted-foreground" />
+        {count > 0 && (
+          <span className="absolute -top-1 -right-1 h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+        )}
+      </div>
       <span className="text-sm text-muted-foreground">
-        {userIds.length} active user{userIds.length !== 1 ? 's' : ''}
+        {count} active user{count !== 1 ? 's' : ''}
       </span>
     </div>
   );
@@ -25,7 +32,8 @@ const ActiveUsers = ({ userIds }: { userIds: number[] }) => {
 export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
   const [isCreateTaskDialogOpen, setIsCreateTaskDialogOpen] = useState(false);
-  const [activeUsers, setActiveUsers] = useState<number[]>([]);
+  const [activeUserCount, setActiveUserCount] = useState(0);
+  const { user } = useAuth();
 
   const { data: project, isLoading: projectLoading } = useQuery<Project>({
     queryKey: ["/api/projects", id],
@@ -35,19 +43,22 @@ export default function ProjectDetails() {
     queryKey: ["/api/projects", id, "tasks"],
   });
 
-  // Use the collaboration hook
+  // Use the collaboration hook with authenticated user ID
   const { sendTaskUpdate } = useCollaboration({
     projectId: parseInt(id),
-    userId: 1, // TODO: Get from auth context
+    userId: user?.id,
     onTaskUpdate: (updatedTask) => {
-      // Handle task updates from other users
-      console.log('Task updated:', updatedTask);
+      console.log('Task updated by another user:', updatedTask);
+      // Invalidate tasks query to refresh the UI
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", id, "tasks"] });
     },
     onUserJoined: (userId) => {
-      setActiveUsers(prev => [...prev, userId]);
+      console.log('User joined:', userId);
+      setActiveUserCount(prev => prev + 1);
     },
     onUserLeft: (userId) => {
-      setActiveUsers(prev => prev.filter(id => id !== userId));
+      console.log('User left:', userId);
+      setActiveUserCount(prev => Math.max(0, prev - 1));
     }
   });
 
@@ -67,8 +78,8 @@ export default function ProjectDetails() {
           <p className="text-muted-foreground">{project.description}</p>
         </div>
         <div className="flex items-center gap-4">
-          <ActiveUsers userIds={activeUsers} />
-          <Link href={`/projects/${id}/critical-path`}>
+          <ActiveUsers count={activeUserCount} />
+          <Link href={`/projects/${id}/critical-path`} data-testid="link-critical-path">
             <Button variant="outline">
               <GitFork className="mr-2 h-4 w-4" />
               Critical Path

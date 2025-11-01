@@ -6,7 +6,7 @@ interface Client {
   id: string;
   ws: WebSocket;
   projectId?: number;
-  userId?: number;
+  userId?: string;
 }
 
 class CollaborationService {
@@ -39,7 +39,7 @@ class CollaborationService {
         id: clientId,
         ws,
         projectId: query.projectId ? Number(query.projectId) : undefined,
-        userId: query.userId ? Number(query.userId) : undefined
+        userId: query.userId ? String(query.userId) : undefined
       });
 
       // Handle incoming messages

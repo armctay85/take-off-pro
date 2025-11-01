@@ -3,11 +3,11 @@ import { useToast } from '@/hooks/use-toast';
 
 interface CollaborationOptions {
   projectId?: number;
-  userId?: number;
+  userId?: string;
   onTaskUpdate?: (data: any) => void;
   onResourceAssignment?: (data: any) => void;
-  onUserJoined?: (userId: number) => void;
-  onUserLeft?: (userId: number) => void;
+  onUserJoined?: (userId: string) => void;
+  onUserLeft?: (userId: string) => void;
 }
 
 export function useCollaboration({
