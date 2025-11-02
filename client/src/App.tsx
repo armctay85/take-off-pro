@@ -35,6 +35,8 @@ function AuthenticatedApp() {
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  console.log("Auth state:", { isAuthenticated, isLoading });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">

@@ -13,8 +13,13 @@ export async function registerRoutes(app: Express) {
   const apiRouter = Router();
 
   // Auth routes
-  apiRouter.get('/auth/user', isAuthenticated, async (req: any, res) => {
+  apiRouter.get('/auth/user', async (req: any, res) => {
     try {
+      // Check if user is authenticated
+      if (!req.isAuthenticated() || !req.user?.claims?.sub) {
+        return res.json(null);
+      }
+      
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
       res.json(user);
