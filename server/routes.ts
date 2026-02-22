@@ -10,6 +10,9 @@ export async function registerRoutes(app: Express) {
   // Setup authentication first
   await setupAuth(app);
 
+  // Health check — Railway uses this
+  app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'take-off-pro', timestamp: new Date().toISOString() }));
+
   const apiRouter = Router();
 
   // Auth routes
