@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertTaskSchema, insertResourceSchema, insertResourceAssignmentSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupAuth, isAuthenticated } from "./auth";
 
 export async function registerRoutes(app: Express) {
   // Setup authentication first
@@ -13,21 +13,7 @@ export async function registerRoutes(app: Express) {
   const apiRouter = Router();
 
   // Auth routes
-  apiRouter.get('/auth/user', async (req: any, res) => {
-    try {
-      // Check if user is authenticated
-      if (!req.isAuthenticated() || !req.user?.claims?.sub) {
-        return res.json(null);
-      }
-      
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      res.json(user);
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
+  // /api/auth/user is handled directly in auth.ts (setupAuth)
 
   // Project routes (protected)
   apiRouter.get("/projects", isAuthenticated, async (_req, res) => {
