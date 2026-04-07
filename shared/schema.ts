@@ -32,12 +32,16 @@ export type User = typeof users.$inferSelect;
 // Project table
 export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
   description: text("description"),
   startDate: timestamp("start_date").notNull(),
   endDate: timestamp("end_date").notNull(),
   budget: decimal("budget", { precision: 10, scale: 2 }).notNull(),
-  status: text("status").notNull().default('active')
+  status: text("status").notNull().default('active'),
+  deletedAt: timestamp("deleted_at"), // Soft delete
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow()
 });
 
 // Tasks table
@@ -93,8 +97,27 @@ export const criticalPaths = pgTable("critical_paths", {
   slack: integer("slack").notNull()
 });
 
+// Audit log table
+export const auditLogs = pgTable("audit_logs", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id),
+  action: text("action").notNull(), // CREATE, UPDATE, DELETE
+  entityType: text("entity_type").notNull(), // project, task, resource
+  entityId: integer("entity_id").notNull(),
+  oldValues: jsonb("old_values"),
+  newValues: jsonb("new_values"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow()
+}, (table) => [
+  index("idx_audit_user").on(table.userId),
+  index("idx_audit_entity").on(table.entityType, table.entityId),
+  index("idx_audit_created").on(table.createdAt)
+]);
+
 // Insert schemas with proper validation and type coercion
 export const insertProjectSchema = createInsertSchema(projects, {
+  userId: z.string().min(1),
   name: z.string().min(1, "Project name is required"),
   description: z.string().nullable(),
   startDate: z.coerce.date(),
@@ -151,3 +174,6 @@ export type InsertResourceAssignment = z.infer<typeof insertResourceAssignmentSc
 
 export type CriticalPath = typeof criticalPaths.$inferSelect;
 export type InsertCriticalPath = z.infer<typeof insertCriticalPathSchema>;
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = typeof auditLogs.$inferInsert;

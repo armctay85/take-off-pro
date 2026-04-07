@@ -1,12 +1,56 @@
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { performHealthCheck } from "./health-check";
 import { setupWebSocketServer } from "./services/websocket";
+import { rateLimits } from "./middleware/rate-limit";
+import { sanitizeInput, sanitizeNoSql } from "./middleware/sanitization";
+import { globalErrorHandler, setupUnhandledRejectionHandler, notFoundHandler, requestTimeout } from "./middleware/error-handler";
+
+// Set up unhandled rejection handler
+setupUnhandledRejectionHandler();
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+
+// Security headers with Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === "production" 
+    ? process.env.ALLOWED_ORIGINS?.split(",") || []
+    : true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+}));
+
+// Body parsing
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
+
+// Request timeout
+app.use(requestTimeout(30000));
+
+// Input sanitization
+app.use(sanitizeNoSql);
+app.use(sanitizeInput);
+
+// Apply rate limiting
+app.use("/api/", rateLimits.api);
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -39,38 +83,66 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
+// Health check endpoint (no auth required)
 app.get('/api/health', async (_req, res) => {
   const healthCheck = await performHealthCheck();
   res.status(healthCheck.status === 'healthy' ? 200 : 503).json(healthCheck);
 });
 
 (async () => {
-  const server = await registerRoutes(app);
+  try {
+    const server = await registerRoutes(app);
 
-  // Setup WebSocket server
-  setupWebSocketServer(server);
+    // Setup WebSocket server with security
+    const wsService = setupWebSocketServer(server);
+    
+    // Graceful shutdown handler
+    const gracefulShutdown = (signal: string) => {
+      console.log(`\n${signal} received. Starting graceful shutdown...`);
+      
+      // Close WebSocket connections
+      if (wsService) {
+        wsService.shutdown();
+      }
+      
+      server.close(() => {
+        console.log("HTTP server closed");
+        process.exit(0);
+      });
+      
+      // Force shutdown after 30 seconds
+      setTimeout(() => {
+        console.error("Forced shutdown after timeout");
+        process.exit(1);
+      }, 30000);
+    };
+    
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-  // Global error handler
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    log(`Error: ${message}`);
-    res.status(status).json({ message });
-  });
+    // 404 handler for API routes
+    app.use("/api/*", notFoundHandler);
 
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
+    // Global error handler - must be last
+    app.use(globalErrorHandler);
+
+    if (app.get("env") === "development") {
+      await setupVite(app, server);
+    } else {
+      serveStatic(app);
+    }
+
+    const port = parseInt(process.env.PORT || "5000", 10);
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => {
+      log(`🚀 Develoop Take-off Pro server running on port ${port}`);
+      log(`📊 Health check: http://localhost:${port}/api/health`);
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
   }
-
-  const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
 })();

@@ -43,6 +43,16 @@ export const isAuthenticated: RequestHandler = (req, res, next) => {
   next();
 };
 
+// ── Auth middleware with enhanced security ───────────────────────────────────
+export const requireAuth: RequestHandler = (req, res, next) => {
+  const userId = (req.session as any).userId;
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  (req as any).user = { id: userId };
+  next();
+};
+
 // ── Auth routes + setup ───────────────────────────────────────────────────────
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);

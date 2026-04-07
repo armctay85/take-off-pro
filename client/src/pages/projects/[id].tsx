@@ -11,6 +11,8 @@ import { Project, Task } from "@shared/schema";
 import { useCollaboration } from "@/hooks/use-collaboration";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient } from "@/lib/queryClient";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ContentSkeleton } from "@/components/loading-screen";
 
 // Add a component to show active users
 const ActiveUsers = ({ count }: { count: number }) => {
@@ -33,7 +35,7 @@ export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
   const [isCreateTaskDialogOpen, setIsCreateTaskDialogOpen] = useState(false);
   const [activeUserCount, setActiveUserCount] = useState(0);
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
   const { data: project, isLoading: projectLoading } = useQuery<Project>({
     queryKey: ["/api/projects", id],
@@ -46,33 +48,45 @@ export default function ProjectDetails() {
   // Use the collaboration hook with authenticated user ID
   const { sendTaskUpdate } = useCollaboration({
     projectId: parseInt(id),
-    userId: user?.id,
-    onTaskUpdate: (updatedTask) => {
+    onTaskUpdate: (updatedTask: any) => {
       console.log('Task updated by another user:', updatedTask);
       // Invalidate tasks query to refresh the UI
       queryClient.invalidateQueries({ queryKey: ["/api/projects", id, "tasks"] });
     },
-    onUserJoined: (userId) => {
-      console.log('User joined:', userId);
+    onUserJoined: () => {
       setActiveUserCount(prev => prev + 1);
     },
-    onUserLeft: (userId) => {
-      console.log('User left:', userId);
+    onUserLeft: () => {
       setActiveUserCount(prev => Math.max(0, prev - 1));
     }
   });
 
   if (projectLoading || tasksLoading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <ContentSkeleton lines={5} />
+      </div>
+    );
   }
 
   if (!project) {
-    return <div>Project not found</div>;
+    return (
+      <div className="text-center py-12">
+        <h2 className="text-xl font-semibold text-muted-foreground">Project not found</h2>
+        <Link href="/projects">
+          <Button variant="outline" className="mt-4">Back to Projects</Button>
+        </Link>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">{project.name}</h1>
           <p className="text-muted-foreground">{project.description}</p>
@@ -109,7 +123,7 @@ export default function ProjectDetails() {
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Budget</p>
-                <p>${project.budget.toLocaleString()}</p>
+                <p>${Number(project.budget).toLocaleString()}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Status</p>
@@ -146,7 +160,7 @@ export default function ProjectDetails() {
                 </Card>
               ))}
               {(!tasks || tasks.length === 0) && (
-                <p className="text-center text-muted-foreground">No tasks created yet</p>
+                <p className="text-center text-muted-foreground py-8">No tasks created yet</p>
               )}
             </div>
           </CardContent>
@@ -160,10 +174,8 @@ export default function ProjectDetails() {
           </DialogHeader>
           <TaskForm 
             projectId={parseInt(id)} 
-            onSuccess={(task) => {
+            onSuccess={() => {
               setIsCreateTaskDialogOpen(false);
-              // Notify other users about the new task
-              sendTaskUpdate(task);
             }} 
           />
         </DialogContent>

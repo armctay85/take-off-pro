@@ -63,7 +63,7 @@ export async function performHealthCheck(): Promise<HealthCheckResult> {
 
   // Check storage methods
   try {
-    await storage.getProjects();
+    await storage.getUser('health-check-user');
     result.components.storage = { status: 'healthy' };
   } catch (error) {
     result.components.storage = {

@@ -5,7 +5,8 @@ import {
   FolderKanban,
   Users,
   GitFork,
-  LogOut
+  LogOut,
+  ExternalLink
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,17 @@ export default function Sidebar() {
   return (
     <div className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
       <div className="h-16 flex items-center px-6 border-b border-sidebar-border">
-        <h1 className="text-xl font-bold text-sidebar-foreground">Take-off Pro</h1>
+        <div className="flex flex-col">
+          <h1 className="text-xl font-bold text-sidebar-foreground">Take-off Pro</h1>
+          <a 
+            href="https://develoop.com.au" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground flex items-center gap-1 transition-colors"
+          >
+            by Develoop <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
       </div>
       <nav className="p-4 flex-1">
         {navigation.map((item) => {
@@ -74,6 +85,12 @@ export default function Sidebar() {
           <LogOut className="h-4 w-4 mr-2" />
           Logout
         </Button>
+        <div className="mt-4 pt-4 border-t border-sidebar-border">
+          <p className="text-xs text-sidebar-foreground/50 text-center">
+            © {new Date().getFullYear()} Develoop Pty Ltd<br />
+            <span className="text-[10px]">ABN 30 140 738 615</span>
+          </p>
+        </div>
       </div>
     </div>
   );

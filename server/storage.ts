@@ -10,22 +10,25 @@ import {
   resources,
   resourceAssignments,
   criticalPaths,
-  users
+  users,
+  auditLogs
 } from "@shared/schema";
 import { db } from './db';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 
 export interface IStorage {
-  // User operations (Required for Replit Auth)
+  // User operations
   getUser(id: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
 
   // Project operations
-  getProjects(): Promise<Project[]>;
+  getProjects(userId: string): Promise<Project[]>;
   getProject(id: number): Promise<Project | undefined>;
   createProject(project: InsertProject): Promise<Project>;
   updateProject(id: number, project: Partial<Project>): Promise<Project>;
   deleteProject(id: number): Promise<void>;
+  restoreProject(id: number): Promise<Project>;
 
   // Task operations
   getTasks(projectId: number): Promise<Task[]>;
@@ -49,12 +52,23 @@ export interface IStorage {
   // Critical path operations
   getCriticalPath(projectId: number): Promise<CriticalPath[]>;
   updateCriticalPath(projectId: number, paths: InsertCriticalPath[]): Promise<CriticalPath[]>;
+
+  // Audit log operations
+  getAuditLogs(userId: string, limit?: number): Promise<any[]>;
 }
 
 export class PostgresStorage implements IStorage {
-  // User operations (Required for Replit Auth)
+  // ============================================================================
+  // USER OPERATIONS
+  // ============================================================================
+
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
   }
 
@@ -73,91 +87,169 @@ export class PostgresStorage implements IStorage {
     return user;
   }
 
-  // Project operations
-  async getProjects(): Promise<Project[]> {
-    return await db.select().from(projects);
+  // ============================================================================
+  // PROJECT OPERATIONS
+  // ============================================================================
+
+  async getProjects(userId: string): Promise<Project[]> {
+    return await db
+      .select()
+      .from(projects)
+      .where(
+        and(
+          eq(projects.userId, userId),
+          isNull(projects.deletedAt)
+        )
+      )
+      .orderBy(desc(projects.createdAt));
   }
 
   async getProject(id: number): Promise<Project | undefined> {
-    const result = await db.select().from(projects).where(eq(projects.id, id));
-    return result[0];
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(
+        and(
+          eq(projects.id, id),
+          isNull(projects.deletedAt)
+        )
+      );
+    return project;
   }
 
   async createProject(project: InsertProject): Promise<Project> {
-    const result = await db.insert(projects).values(project).returning();
-    return result[0];
+    const [newProject] = await db
+      .insert(projects)
+      .values({
+        userId: project.userId,
+        name: project.name,
+        description: project.description,
+        startDate: project.startDate,
+        endDate: project.endDate,
+        budget: project.budget.toString(),
+        status: project.status,
+      })
+      .returning();
+    return newProject;
   }
 
   async updateProject(id: number, project: Partial<Project>): Promise<Project> {
-    const result = await db
+    const [updated] = await db
       .update(projects)
-      .set(project)
+      .set({
+        ...project,
+        updatedAt: new Date()
+      })
       .where(eq(projects.id, id))
       .returning();
-    return result[0];
+    return updated;
   }
 
   async deleteProject(id: number): Promise<void> {
-    await db.delete(projects).where(eq(projects.id, id));
+    // Soft delete
+    await db
+      .update(projects)
+      .set({ deletedAt: new Date() })
+      .where(eq(projects.id, id));
   }
 
-  // Task operations
+  async restoreProject(id: number): Promise<Project> {
+    const [restored] = await db
+      .update(projects)
+      .set({ deletedAt: null })
+      .where(eq(projects.id, id))
+      .returning();
+    return restored;
+  }
+
+  // ============================================================================
+  // TASK OPERATIONS
+  // ============================================================================
+
   async getTasks(projectId: number): Promise<Task[]> {
-    return await db.select().from(tasks).where(eq(tasks.projectId, projectId));
+    return await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.projectId, projectId))
+      .orderBy(tasks.startDate);
   }
 
   async getTask(id: number): Promise<Task | undefined> {
-    const result = await db.select().from(tasks).where(eq(tasks.id, id));
-    return result[0];
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, id));
+    return task;
   }
 
   async createTask(task: InsertTask): Promise<Task> {
-    const result = await db.insert(tasks).values(task).returning();
-    return result[0];
+    const [newTask] = await db
+      .insert(tasks)
+      .values(task)
+      .returning();
+    return newTask;
   }
 
   async updateTask(id: number, task: Partial<Task>): Promise<Task> {
-    const result = await db
+    const [updated] = await db
       .update(tasks)
       .set(task)
       .where(eq(tasks.id, id))
       .returning();
-    return result[0];
+    return updated;
   }
 
   async deleteTask(id: number): Promise<void> {
     await db.delete(tasks).where(eq(tasks.id, id));
   }
 
-  // Resource operations
+  // ============================================================================
+  // RESOURCE OPERATIONS
+  // ============================================================================
+
   async getResources(): Promise<Resource[]> {
-    return await db.select().from(resources);
+    return await db
+      .select()
+      .from(resources)
+      .orderBy(resources.name);
   }
 
   async getResource(id: number): Promise<Resource | undefined> {
-    const result = await db.select().from(resources).where(eq(resources.id, id));
-    return result[0];
+    const [resource] = await db
+      .select()
+      .from(resources)
+      .where(eq(resources.id, id));
+    return resource;
   }
 
   async createResource(resource: InsertResource): Promise<Resource> {
-    const result = await db.insert(resources).values(resource).returning();
-    return result[0];
+    const [newResource] = await db
+      .insert(resources)
+      .values({
+        ...resource,
+        costPerHour: resource.costPerHour.toString()
+      })
+      .returning();
+    return newResource;
   }
 
   async updateResource(id: number, resource: Partial<Resource>): Promise<Resource> {
-    const result = await db
+    const [updated] = await db
       .update(resources)
       .set(resource)
       .where(eq(resources.id, id))
       .returning();
-    return result[0];
+    return updated;
   }
 
   async deleteResource(id: number): Promise<void> {
     await db.delete(resources).where(eq(resources.id, id));
   }
 
-  // Resource assignment operations
+  // ============================================================================
+  // RESOURCE ASSIGNMENT OPERATIONS
+  // ============================================================================
+
   async getResourceAssignments(taskId: number): Promise<ResourceAssignment[]> {
     return await db
       .select()
@@ -166,31 +258,58 @@ export class PostgresStorage implements IStorage {
   }
 
   async createResourceAssignment(assignment: InsertResourceAssignment): Promise<ResourceAssignment> {
-    const result = await db.insert(resourceAssignments).values(assignment).returning();
-    return result[0];
+    const [newAssignment] = await db
+      .insert(resourceAssignments)
+      .values(assignment)
+      .returning();
+    return newAssignment;
   }
 
   async deleteResourceAssignment(id: number): Promise<void> {
     await db.delete(resourceAssignments).where(eq(resourceAssignments.id, id));
   }
 
-  // Critical path operations
+  // ============================================================================
+  // CRITICAL PATH OPERATIONS
+  // ============================================================================
+
   async getCriticalPath(projectId: number): Promise<CriticalPath[]> {
     return await db
       .select()
       .from(criticalPaths)
-      .where(eq(criticalPaths.projectId, projectId));
+      .where(eq(criticalPaths.projectId, projectId))
+      .orderBy(criticalPaths.earliestStart);
   }
 
   async updateCriticalPath(projectId: number, paths: InsertCriticalPath[]): Promise<CriticalPath[]> {
-    // First delete existing paths
-    await db.delete(criticalPaths).where(eq(criticalPaths.projectId, projectId));
+    return await db.transaction(async (tx) => {
+      // Delete existing paths
+      await tx
+        .delete(criticalPaths)
+        .where(eq(criticalPaths.projectId, projectId));
 
-    // Then insert new paths
-    if (paths.length > 0) {
-      return await db.insert(criticalPaths).values(paths).returning();
-    }
-    return [];
+      // Insert new paths
+      if (paths.length > 0) {
+        return await tx
+          .insert(criticalPaths)
+          .values(paths)
+          .returning();
+      }
+      return [];
+    });
+  }
+
+  // ============================================================================
+  // AUDIT LOG OPERATIONS
+  // ============================================================================
+
+  async getAuditLogs(userId: string, limit: number = 50): Promise<any[]> {
+    return await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.userId, userId))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(Math.min(limit, 100));
   }
 }
 
